@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
-import { Card, StatCard, Loader } from '../components/UI';
+import { Card, StatCard, Loader, DateRangeFilter, Pagination, usePagination } from '../components/UI';
 import { fmt, fmtNum } from '../utils/format';
 
 export function AccountingPage() {
     const { t, searchQuery } = useApp();
     const [sales, setSales] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [dateRange, setDateRange] = useState({ from: "", to: "" });
 
     useEffect(() => { loadData(); }, []);
 
@@ -58,9 +59,25 @@ export function AccountingPage() {
         document.body.removeChild(link);
     };
 
+    const filteredSales = useMemo(() => {
+        let list = sales;
+        if (dateRange.from) list = list.filter(s => s.created_at >= dateRange.from);
+        if (dateRange.to) list = list.filter(s => s.created_at <= dateRange.to + "T23:59:59");
+        const query = searchQuery.toLowerCase().trim();
+        if (query) {
+            list = list.filter(s =>
+                s.product?.color?.name?.toLowerCase().includes(query) ||
+                s.product?.category?.name?.toLowerCase().includes(query)
+            );
+        }
+        return list;
+    }, [sales, dateRange, searchQuery]);
+
+    const { page, totalPages, paged, goTo, totalItems, perPage } = usePagination(filteredSales, 25);
+
     if (loading) return <Loader />;
 
-    const totals = sales.reduce((acc, s) => {
+    const totals = filteredSales.reduce((acc, s) => {
         const totalPrice = s.sale_price * s.quantity;
         const cost = (s.product?.purchase_price || 0) * s.quantity;
         return {
@@ -87,6 +104,7 @@ export function AccountingPage() {
                 </button>
             </div>
 
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <StatCard label="მთლიანი შემოსავალი" value={fmt(totals.revenue)} sub="გაყიდვების ჯამი" color="#34d399" />
                 <StatCard label="მთლიანი დანახარჯი" value={fmt(totals.cost)} sub="თვითღირებულება" color="#f87171" />
@@ -107,14 +125,7 @@ export function AccountingPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {sales.filter(s => {
-                                const query = searchQuery.toLowerCase().trim();
-                                if (!query) return true;
-                                return (
-                                    s.product?.color?.name?.toLowerCase().includes(query) ||
-                                    s.product?.category?.name?.toLowerCase().includes(query)
-                                );
-                            }).map((s, i) => {
+                            {paged.map((s, i) => {
                                 const totalPrice = s.sale_price * s.quantity;
                                 const cost = (s.product?.purchase_price || 0) * s.quantity;
                                 return (
@@ -131,11 +142,12 @@ export function AccountingPage() {
                                     </tr>
                                 );
                             })}
-                            {sales.length === 0 && (
+                            {filteredSales.length === 0 && (
                                 <tr><td colSpan="6" className="py-8 text-center" style={{ color: t.textFaint }}>მონაცემები არ არის</td></tr>
                             )}
                         </tbody>
                     </table>
+                    <Pagination currentPage={page} totalPages={totalPages} onPageChange={goTo} totalItems={totalItems} perPage={perPage} />
                 </div>
             </Card>
         </div>

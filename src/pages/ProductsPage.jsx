@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
-import { Btn, Badge, Card, Modal, Input, Select, Loader, Logo } from '../components/UI';
+import { Btn, Badge, Card, Modal, Input, Select, Loader, Logo, Pagination, ConfirmDialog, usePagination, useConfirm } from '../components/UI';
 import { Icon } from '../components/Icons';
 import { fmt } from '../utils/format';
 
@@ -16,6 +16,7 @@ export function ProductsPage() {
     const [form, setForm] = useState({ category_id: "", color_id: "", thickness: "18მმ", description: "", purchase_price: "", sale_price: "" });
     const [newName, setNewName] = useState("");
     const fileInputRef = useRef(null);
+    const { confirm, dialogProps } = useConfirm();
 
     const downloadTemplate = () => {
         const link = document.createElement("a");
@@ -94,7 +95,8 @@ export function ProductsPage() {
     };
 
     const deleteProduct = async (id) => {
-        if (!confirm("დარწმუნებული ხართ?")) return;
+        const ok = await confirm("პროდუქტის წაშლა", "ნამდვილად გსურთ ამ პროდუქტის წაშლა? ეს მოქმედება შეუქცევადია.");
+        if (!ok) return;
         await supabase.from("products").delete().eq("id", id);
         toast("პროდუქტი წაიშალა");
         loadAll();
@@ -118,6 +120,19 @@ export function ProductsPage() {
         setModal("product");
     };
 
+    const filteredProducts = useMemo(() => {
+        const query = searchQuery.toLowerCase().trim();
+        if (!query) return products;
+        return products.filter(p =>
+            p.category?.toLowerCase().includes(query) ||
+            p.color?.toLowerCase().includes(query) ||
+            p.description?.toLowerCase().includes(query) ||
+            p.thickness?.toLowerCase().includes(query)
+        );
+    }, [products, searchQuery]);
+
+    const { page, totalPages, paged, goTo, totalItems, perPage } = usePagination(filteredProducts, 20);
+
     if (loading) return <Loader />;
 
     return (
@@ -137,16 +152,7 @@ export function ProductsPage() {
                 </div>
             </div>
             <div className="grid gap-3">
-                {products.filter(p => {
-                    const query = searchQuery.toLowerCase().trim();
-                    if (!query) return true;
-                    return (
-                        p.category?.toLowerCase().includes(query) ||
-                        p.color?.toLowerCase().includes(query) ||
-                        p.description?.toLowerCase().includes(query) ||
-                        p.thickness?.toLowerCase().includes(query)
-                    );
-                }).map(p => (
+                {paged.map(p => (
                     <div key={p.product_id} className="rounded-2xl p-4 flex items-center gap-4 border" style={{ background: t.card, borderColor: t.border }}>
                         <Logo size="sm" />
                         <div className="flex-1 min-w-0">
@@ -167,12 +173,13 @@ export function ProductsPage() {
                         </div>
                     </div>
                 ))}
-                {products.length === 0 && (
+                {filteredProducts.length === 0 && (
                     <Card className="text-center py-12">
                         <p className="text-4xl mb-3">📦</p>
                         <p style={{ color: t.textFaint }}>პროდუქტები არ არის. დაამატეთ პირველი!</p>
                     </Card>
                 )}
+                <Pagination currentPage={page} totalPages={totalPages} onPageChange={goTo} totalItems={totalItems} perPage={perPage} />
             </div>
             {modal === "product" && (
                 <Modal title={editItem ? "პროდუქტის რედაქტირება" : "ახალი პროდუქტი"} onClose={() => setModal(null)}>
@@ -205,6 +212,7 @@ export function ProductsPage() {
                     <Btn className="w-full justify-center mt-2" onClick={saveColor}>დამატება</Btn>
                 </Modal>
             )}
+            <ConfirmDialog {...dialogProps} />
         </div>
     );
 }

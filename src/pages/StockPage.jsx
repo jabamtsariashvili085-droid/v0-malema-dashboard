@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
-import { Btn, Badge, Card, Modal, Input, Select, Loader } from '../components/UI';
+import { Btn, Badge, Card, Modal, Input, Select, Loader, Pagination, ConfirmDialog, usePagination, useConfirm } from '../components/UI';
 import { Icon } from '../components/Icons';
 import { fmtNum } from '../utils/format';
 
@@ -14,13 +14,14 @@ export function StockPage() {
     const [modal, setModal] = useState(false);
     const [editItem, setEditItem] = useState(null);
     const [form, setForm] = useState({ product_id: "", quantity: "", note: "" });
+    const { confirm, dialogProps } = useConfirm();
 
     useEffect(() => { loadData(); }, []);
 
     const loadData = async () => {
         const [inv, mov, prod] = await Promise.all([
             supabase.from("inventory").select("*").order("category"),
-            supabase.from("stock_movements").select("*, products(*, categories(name), colors(name))").order("created_at", { ascending: false }).limit(20),
+            supabase.from("stock_movements").select("*, products(*, categories(name), colors(name))").order("created_at", { ascending: false }),
             supabase.from("products").select("*, categories(name), colors(name)").order("created_at"),
         ]);
         setInventory(inv.data || []);
@@ -64,12 +65,26 @@ export function StockPage() {
     };
 
     const deleteMovement = async (id) => {
-        if (!confirm("ჩანაწერის წაშლა?")) return;
+        const ok = await confirm("ჩანაწერის წაშლა", "ნამდვილად გსურთ ამ ჩანაწერის წაშლა? ეს მოქმედება შეუქცევადია.");
+        if (!ok) return;
         const { error } = await supabase.from("stock_movements").delete().eq("id", id);
         if (error) return toast("შეცდომა წაშლისას", "error");
         toast("ჩანაწერი წაიშალა");
         loadData();
     };
+
+    const filteredInventory = useMemo(() => {
+        const query = searchQuery.toLowerCase().trim();
+        if (!query) return inventory;
+        return inventory.filter(p =>
+            p.category?.toLowerCase().includes(query) ||
+            p.color?.toLowerCase().includes(query) ||
+            p.thickness?.toLowerCase().includes(query)
+        );
+    }, [inventory, searchQuery]);
+
+    const { page: invPage, totalPages: invTotalPages, paged: pagedInventory, goTo: invGoTo, totalItems: invTotalItems, perPage: invPerPage } = usePagination(filteredInventory, 20);
+    const { page: movPage, totalPages: movTotalPages, paged: pagedMovements, goTo: movGoTo, totalItems: movTotalItems, perPage: movPerPage } = usePagination(movements, 20);
 
     if (loading) return <Loader />;
 
@@ -83,15 +98,7 @@ export function StockPage() {
                 <Btn variant="success" onClick={() => { setModal(true); setEditItem(null); setForm({ product_id: "", quantity: "", note: "" }); }}>{Icon.plus} ლისტების შემოსვლა</Btn>
             </div>
             <div className="grid gap-3">
-                {inventory.filter(p => {
-                    const query = searchQuery.toLowerCase().trim();
-                    if (!query) return true;
-                    return (
-                        p.category?.toLowerCase().includes(query) ||
-                        p.color?.toLowerCase().includes(query) ||
-                        p.thickness?.toLowerCase().includes(query)
-                    );
-                }).map(p => (
+                {pagedInventory.map(p => (
                     <div key={p.product_id} className="rounded-2xl p-4 flex items-center gap-4 border" style={{ background: t.card, borderColor: t.border }}>
                         <div className="flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -106,11 +113,12 @@ export function StockPage() {
                         <Badge color={p.stock > 15 ? "green" : p.stock > 0 ? "gold" : "red"}>{fmtNum(p.stock)} ლისტი</Badge>
                     </div>
                 ))}
+                <Pagination currentPage={invPage} totalPages={invTotalPages} onPageChange={invGoTo} totalItems={invTotalItems} perPage={invPerPage} />
             </div>
             <Card>
                 <h3 className="font-semibold mb-4 font-display" style={{ color: t.text }}>📥 შემოსვლის ისტორია</h3>
                 <div className="space-y-2">
-                    {movements.map(m => (
+                    {pagedMovements.map(m => (
                         <div key={m.id} className="flex items-center justify-between p-3 rounded-xl text-sm border hover:border-gray-500 transition-colors" style={{ background: t.input, borderColor: t.border }}>
                             <div className="flex-1">
                                 <p style={{ color: t.text }}>{m.products?.colors?.name} — {m.products?.categories?.name}</p>
@@ -129,6 +137,7 @@ export function StockPage() {
                         </div>
                     ))}
                     {movements.length === 0 && <p className="text-sm" style={{ color: t.textFaint }}>შემოსვლები არ არის</p>}
+                    <Pagination currentPage={movPage} totalPages={movTotalPages} onPageChange={movGoTo} totalItems={movTotalItems} perPage={movPerPage} />
                 </div>
             </Card>
             {modal && (
@@ -142,6 +151,7 @@ export function StockPage() {
                     <Btn variant="success" className="w-full justify-center mt-2" onClick={saveStock}>{editItem ? "განახლება" : "შემოსვლის დამატება"}</Btn>
                 </Modal>
             )}
+            <ConfirmDialog {...dialogProps} />
         </div>
     );
 }

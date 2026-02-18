@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
-import { Btn, Badge, Card, Modal, Input, Select, Loader } from '../components/UI';
+import { Btn, Badge, Card, Modal, Input, Select, Loader, DateRangeFilter, Pagination, ConfirmDialog, usePagination, useConfirm } from '../components/UI';
 import { Icon } from '../components/Icons';
 import { fmt } from '../utils/format';
 
@@ -14,6 +14,8 @@ export function SalesPage() {
     const [modal, setModal] = useState(false);
     const [editItem, setEditItem] = useState(null);
     const [form, setForm] = useState({ customer_id: "", product_id: "", quantity: "", sale_price: "" });
+    const [dateRange, setDateRange] = useState({ from: "", to: "" });
+    const { confirm, dialogProps } = useConfirm();
 
     useEffect(() => { loadData(); }, []);
 
@@ -82,13 +84,34 @@ export function SalesPage() {
     };
 
     const deleteSale = async (id) => {
-        if (!confirm("გაყიდვის გაუქმება?")) return;
+        const ok = await confirm("გაყიდვის გაუქმება", "ნამდვილად გსურთ ამ გაყიდვის გაუქმება? ეს მოქმედება შეუქცევადია.");
+        if (!ok) return;
         await supabase.from("sales").delete().eq("id", id);
         toast("გაყიდვა გაუქმდა"); loadData();
     };
 
+    const filteredSales = useMemo(() => {
+        let list = sales;
+        // Date filter
+        if (dateRange.from) list = list.filter(s => s.created_at >= dateRange.from);
+        if (dateRange.to) list = list.filter(s => s.created_at <= dateRange.to + "T23:59:59");
+        // Search filter
+        const query = searchQuery.toLowerCase().trim();
+        if (query) {
+            list = list.filter(s =>
+                (s.customers?.full_name || "ანონიმური").toLowerCase().includes(query) ||
+                s.products?.colors?.name?.toLowerCase().includes(query) ||
+                s.products?.categories?.name?.toLowerCase().includes(query) ||
+                new Date(s.created_at).toLocaleDateString("ka-GE").includes(query)
+            );
+        }
+        return list;
+    }, [sales, dateRange, searchQuery]);
+
+    const { page, totalPages, paged, goTo, totalItems, perPage } = usePagination(filteredSales, 20);
+
     if (loading) return <Loader />;
-    const totalRevenue = sales.reduce((s, x) => s + x.sale_price * x.quantity, 0);
+    const totalRevenue = filteredSales.reduce((s, x) => s + x.sale_price * x.quantity, 0);
 
     return (
         <div className="space-y-6 page-enter">
@@ -99,17 +122,9 @@ export function SalesPage() {
                 </div>
                 <Btn onClick={() => { setModal(true); setEditItem(null); setForm({ customer_id: "", product_id: "", quantity: "", sale_price: "" }); }}>{Icon.plus} ახალი გაყიდვა</Btn>
             </div>
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
             <div className="grid gap-3">
-                {sales.filter(s => {
-                    const query = searchQuery.toLowerCase().trim();
-                    if (!query) return true;
-                    return (
-                        (s.customers?.full_name || "ანონიმური").toLowerCase().includes(query) ||
-                        s.products?.colors?.name?.toLowerCase().includes(query) ||
-                        s.products?.categories?.name?.toLowerCase().includes(query) ||
-                        new Date(s.created_at).toLocaleDateString("ka-GE").includes(query)
-                    );
-                }).map(s => (
+                {paged.map(s => (
                     <div key={s.id} className="rounded-2xl p-4 flex items-center gap-4 border glass" style={{ borderColor: t.border }}>
                         <div className="flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -130,12 +145,13 @@ export function SalesPage() {
                         </div>
                     </div>
                 ))}
-                {sales.length === 0 && (
+                {filteredSales.length === 0 && (
                     <Card className="text-center py-12">
                         <p className="text-4xl mb-3">🛒</p>
                         <p style={{ color: t.textFaint }}>გაყიდვები ჯერ არ არის</p>
                     </Card>
                 )}
+                <Pagination currentPage={page} totalPages={totalPages} onPageChange={goTo} totalItems={totalItems} perPage={perPage} />
             </div>
             {modal && (
                 <Modal title={editItem ? "გაყიდვის რედაქტირება" : "ახალი გაყიდვა"} onClose={() => setModal(false)}>
@@ -163,6 +179,7 @@ export function SalesPage() {
                     <Btn className="w-full justify-center" onClick={saveSale}>{editItem ? "განახლება" : "გაყიდვის რეგისტრაცია"}</Btn>
                 </Modal>
             )}
+            <ConfirmDialog {...dialogProps} />
         </div>
     );
 }
