@@ -14,6 +14,7 @@ import { CustomersPage } from "./pages/CustomersPage";
 import { ReportPage } from "./pages/ReportPage";
 import { AccountingPage } from "./pages/AccountingPage";
 import { InstallPrompt } from "./components/InstallPrompt";
+import { NotificationBell } from "./components/Notifications";
 
 const PAGES = [
   { id: "dashboard", label: "მიმოხილვა", icon: Icon.dashboard },
@@ -139,6 +140,7 @@ function App() {
             <button className="lg:hidden transition-colors" style={{ color: t.textMuted }} onClick={() => setSidebarOpen(true)}>{Icon.menu}</button>
             <p className="text-sm whitespace-nowrap" style={{ color: t.textMuted }}>{PAGES.find(p => p.id === page)?.label}</p>
             <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="ძებნა..." />
+            <NotificationBell />
             <button
               onClick={() => window.print()}
               className="p-2 rounded-lg transition-colors print:hidden"

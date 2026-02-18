@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
-import { Btn, Badge, Card, Modal, Input, Select, Loader } from '../components/UI';
+import { Btn, Badge, Card, Modal, Input, Select, Loader, StatCard } from '../components/UI';
 import { Icon } from '../components/Icons';
-import { fmt } from '../utils/format';
+import { fmt, fmtNum } from '../utils/format';
 
 export function SalesPage() {
     const { toast, t, searchQuery } = useApp();
@@ -13,154 +13,220 @@ export function SalesPage() {
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [editItem, setEditItem] = useState(null);
-    const [form, setForm] = useState({ customer_id: "", product_id: "", quantity: "", sale_price: "" });
+    const [form, setForm] = useState({ product_id: "", customer_id: "", quantity: "", sale_price: "", note: "" });
+    const [dateFrom, setDateFrom] = useState("");
+    const [dateTo, setDateTo] = useState("");
 
     useEffect(() => { loadData(); }, []);
 
     const loadData = async () => {
         const [s, p, c] = await Promise.all([
             supabase.from("sales").select("*, customers(full_name), products(*, categories(name), colors(name))").order("created_at", { ascending: false }),
-            supabase.from("inventory").select("*"),
+            supabase.from("products").select("*, categories(name), colors(name)").order("created_at"),
             supabase.from("customers").select("*").order("full_name"),
         ]);
         setSales(s.data || []);
-        // When editing, we might need the current product even if stock is 0
         setProducts(p.data || []);
         setCustomers(c.data || []);
         setLoading(false);
     };
 
-    const handleProductChange = (productId) => {
-        const p = products.find(x => x.product_id === productId);
-        setForm({ ...form, product_id: productId, sale_price: p ? p.sale_price : "" });
-    };
-
     const saveSale = async () => {
-        if (!form.product_id || !form.quantity || !form.sale_price) return toast("შეავსეთ ყველა ველი", "error");
-
-        const prod = products.find(p => p.product_id === form.product_id);
-        // If it's a new sale or changing product/increasing quantity, check stock
-        // For simplicity, we'll check against current inventory view
-        if (!editItem && prod && +form.quantity > prod.stock) {
-            return toast(`სტოკში მხოლოდ ${prod.stock} ლისტია`, "error");
+        if (!form.product_id || !form.quantity || +form.quantity <= 0 || !form.sale_price) {
+            return toast("შეავსეთ ყველა სავალდებულო ველი", "error");
         }
+
+        const payload = {
+            product_id: form.product_id,
+            customer_id: form.customer_id || null,
+            quantity: +form.quantity,
+            sale_price: +form.sale_price,
+            note: form.note || null,
+        };
 
         if (editItem) {
-            const { error } = await supabase.from("sales").update({
-                customer_id: form.customer_id || null,
-                product_id: form.product_id,
-                quantity: +form.quantity,
-                sale_price: +form.sale_price
-            }).eq("id", editItem);
-            if (error) return toast("შეცდომა განახლებისას", "error");
-            toast("გაყიდვა განახლდა ✓");
+            const { error } = await supabase.from("sales").update(payload).eq("id", editItem);
+            if (error) return toast("შეცდომა: " + error.message, "error");
+            toast("გაყიდვა განახლდა");
         } else {
-            const { error } = await supabase.from("sales").insert({
-                customer_id: form.customer_id || null,
-                product_id: form.product_id,
-                quantity: +form.quantity,
-                sale_price: +form.sale_price
-            });
-            if (error) return toast("შეცდომა რეგისტრაციისას", "error");
-            toast("გაყიდვა დარეგისტრირდა ✓");
+            const { error } = await supabase.from("sales").insert(payload);
+            if (error) return toast("შეცდომა: " + error.message, "error");
+            toast("გაყიდვა დაემატა");
         }
 
-        setModal(false); setEditItem(null);
-        setForm({ customer_id: "", product_id: "", quantity: "", sale_price: "" });
+        setModal(false);
+        setEditItem(null);
+        setForm({ product_id: "", customer_id: "", quantity: "", sale_price: "", note: "" });
         loadData();
     };
 
     const openEdit = (s) => {
         setEditItem(s.id);
         setForm({
-            customer_id: s.customer_id,
             product_id: s.product_id,
+            customer_id: s.customer_id || "",
             quantity: s.quantity,
-            sale_price: s.sale_price
+            sale_price: s.sale_price,
+            note: s.note || "",
         });
         setModal(true);
     };
 
     const deleteSale = async (id) => {
-        if (!confirm("გაყიდვის გაუქმება?")) return;
-        await supabase.from("sales").delete().eq("id", id);
-        toast("გაყიდვა გაუქმდა"); loadData();
+        if (!confirm("გაყიდვის ჩანაწერის წაშლა?")) return;
+        const { error } = await supabase.from("sales").delete().eq("id", id);
+        if (error) return toast("შეცდომა წაშლისას", "error");
+        toast("ჩანაწერი წაიშალა");
+        loadData();
+    };
+
+    const onProductSelect = (productId) => {
+        const product = products.find(p => p.id === productId);
+        setForm(prev => ({
+            ...prev,
+            product_id: productId,
+            sale_price: product ? product.sale_price : prev.sale_price,
+        }));
     };
 
     if (loading) return <Loader />;
-    const totalRevenue = sales.reduce((s, x) => s + x.sale_price * x.quantity, 0);
+
+    const filteredSales = sales.filter(s => {
+        const query = searchQuery.toLowerCase().trim();
+        const matchesSearch = !query || (
+            s.customers?.full_name?.toLowerCase().includes(query) ||
+            s.products?.colors?.name?.toLowerCase().includes(query) ||
+            s.products?.categories?.name?.toLowerCase().includes(query) ||
+            s.note?.toLowerCase().includes(query)
+        );
+
+        const saleDate = new Date(s.created_at);
+        const matchesDateFrom = !dateFrom || saleDate >= new Date(dateFrom);
+        const matchesDateTo = !dateTo || saleDate <= new Date(dateTo + "T23:59:59");
+
+        return matchesSearch && matchesDateFrom && matchesDateTo;
+    });
+
+    const totals = filteredSales.reduce((acc, s) => ({
+        count: acc.count + 1,
+        quantity: acc.quantity + (s.quantity || 0),
+        revenue: acc.revenue + (s.sale_price * s.quantity),
+    }), { count: 0, quantity: 0, revenue: 0 });
 
     return (
         <div className="space-y-6 page-enter">
             <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
                     <h2 className="text-2xl font-bold font-display" style={{ color: t.text }}>გაყიდვები</h2>
-                    <p className="text-sm mt-1" style={{ color: t.textMuted }}>სულ: {fmt(totalRevenue)}</p>
+                    <p className="text-sm mt-1" style={{ color: t.textMuted }}>{sales.length} ტრანზაქცია</p>
                 </div>
-                <Btn onClick={() => { setModal(true); setEditItem(null); setForm({ customer_id: "", product_id: "", quantity: "", sale_price: "" }); }}>{Icon.plus} ახალი გაყიდვა</Btn>
+                <Btn onClick={() => { setModal(true); setEditItem(null); setForm({ product_id: "", customer_id: "", quantity: "", sale_price: "", note: "" }); }}>
+                    {Icon.plus} ახალი გაყიდვა
+                </Btn>
             </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                <StatCard label="ტრანზაქციები" value={fmtNum(totals.count)} sub="გაყიდვის ჩანაწერი" color="#60a5fa" />
+                <StatCard label="გაყიდული" value={`${fmtNum(totals.quantity)} ლ.`} sub="ლისტი სულ" />
+                <StatCard label="შემოსავალი" value={fmt(totals.revenue)} sub="ჯამური თანხა" color="#34d399" />
+            </div>
+
+            <Card>
+                <div className="flex items-center gap-3 flex-wrap mb-4">
+                    <p className="text-sm font-medium" style={{ color: t.textMuted }}>ფილტრი:</p>
+                    <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={e => setDateFrom(e.target.value)}
+                        className="rounded-xl px-3 py-2 text-sm border focus:outline-none"
+                        style={{ background: t.input, borderColor: t.inputBorder, color: t.text }}
+                    />
+                    <span style={{ color: t.textFaint }}>-</span>
+                    <input
+                        type="date"
+                        value={dateTo}
+                        onChange={e => setDateTo(e.target.value)}
+                        className="rounded-xl px-3 py-2 text-sm border focus:outline-none"
+                        style={{ background: t.input, borderColor: t.inputBorder, color: t.text }}
+                    />
+                    {(dateFrom || dateTo) && (
+                        <button
+                            onClick={() => { setDateFrom(""); setDateTo(""); }}
+                            className="text-xs px-3 py-2 rounded-xl border transition-colors"
+                            style={{ color: t.textMuted, borderColor: t.inputBorder, background: t.input }}
+                        >
+                            გასუფთავება
+                        </button>
+                    )}
+                </div>
+            </Card>
+
             <div className="grid gap-3">
-                {sales.filter(s => {
-                    const query = searchQuery.toLowerCase().trim();
-                    if (!query) return true;
+                {filteredSales.map(s => {
+                    const total = s.sale_price * s.quantity;
                     return (
-                        (s.customers?.full_name || "ანონიმური").toLowerCase().includes(query) ||
-                        s.products?.colors?.name?.toLowerCase().includes(query) ||
-                        s.products?.categories?.name?.toLowerCase().includes(query) ||
-                        new Date(s.created_at).toLocaleDateString("ka-GE").includes(query)
+                        <div key={s.id} className="rounded-2xl p-4 flex items-center gap-4 border" style={{ background: t.card, borderColor: t.border }}>
+                            <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "rgba(52,211,153,0.15)" }}>
+                                <span style={{ color: "#34d399" }}>{Icon.sales}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="font-semibold" style={{ color: t.text }}>
+                                        {s.products?.colors?.name} — {s.products?.categories?.name}
+                                    </p>
+                                    <Badge color="blue">{s.quantity} ლისტი</Badge>
+                                </div>
+                                <div className="flex gap-3 mt-1 text-xs flex-wrap" style={{ color: t.textFaint }}>
+                                    {s.customers?.full_name && <span>კლიენტი: {s.customers.full_name}</span>}
+                                    <span>ფასი: {fmt(s.sale_price)}/ლ.</span>
+                                    <span>{new Date(s.created_at).toLocaleDateString("ka-GE")}</span>
+                                </div>
+                                {s.note && <p className="text-xs mt-0.5 truncate" style={{ color: t.textFaint }}>{s.note}</p>}
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="text-sm font-bold whitespace-nowrap" style={{ color: "#34d399" }}>{fmt(total)}</span>
+                                <div className="flex gap-1">
+                                    <button onClick={() => openEdit(s)} style={{ color: t.textMuted }} className="hover:opacity-70 transition-opacity p-1">{Icon.edit}</button>
+                                    <button onClick={() => deleteSale(s.id)} style={{ color: "#ef4444" }} className="hover:opacity-70 transition-opacity p-1">{Icon.trash}</button>
+                                </div>
+                            </div>
+                        </div>
                     );
-                }).map(s => (
-                    <div key={s.id} className="rounded-2xl p-4 flex items-center gap-4 border glass" style={{ borderColor: t.border }}>
-                        <div className="flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <p className="font-semibold" style={{ color: t.text }}>{s.customers?.full_name || "ანონიმური"}</p>
-                                <Badge color="blue">{s.products?.colors?.name} — {s.products?.categories?.name}</Badge>
-                            </div>
-                            <div className="flex gap-4 mt-1 text-xs" style={{ color: t.textFaint }}>
-                                <span>{s.quantity} ლისტი × {fmt(s.sale_price)}</span>
-                                <span>{new Date(s.created_at).toLocaleDateString("ka-GE")}</span>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className="font-bold" style={{ color: "#34d399" }}>{fmt(s.sale_price * s.quantity)}</span>
-                            <div className="flex gap-2">
-                                <Btn variant="ghost" className="p-2" onClick={() => openEdit(s)}>{Icon.edit}</Btn>
-                                <Btn variant="danger" className="p-2" onClick={() => deleteSale(s.id)}>{Icon.trash}</Btn>
-                            </div>
-                        </div>
-                    </div>
-                ))}
-                {sales.length === 0 && (
+                })}
+                {filteredSales.length === 0 && (
                     <Card className="text-center py-12">
-                        <p className="text-4xl mb-3">🛒</p>
-                        <p style={{ color: t.textFaint }}>გაყიდვები ჯერ არ არის</p>
+                        <p className="text-4xl mb-3">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-12 h-12 mx-auto" style={{ color: t.textFaint }}>
+                                <line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                            </svg>
+                        </p>
+                        <p style={{ color: t.textFaint }}>გაყიდვები არ მოიძებნა</p>
                     </Card>
                 )}
             </div>
+
             {modal && (
                 <Modal title={editItem ? "გაყიდვის რედაქტირება" : "ახალი გაყიდვა"} onClose={() => setModal(false)}>
-                    <Select label="მომხმარებელი" value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}>
-                        <option value="">აირჩიეთ მომხმარებელი</option>
-                        {customers.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
-                    </Select>
-                    <Select label="პროდუქტი" value={form.product_id} onChange={e => handleProductChange(e.target.value)}>
+                    <Select label="პროდუქტი *" value={form.product_id} onChange={e => onProductSelect(e.target.value)}>
                         <option value="">აირჩიეთ პროდუქტი</option>
-                        {/* Show all products for editing, but only in-stock for new sales */}
-                        {(editItem ? products : products.filter(p => p.stock > 0)).map(p => (
-                            <option key={p.product_id} value={p.product_id}>{p.color} — {p.category} ({p.thickness}) {!editItem ? `— ${p.stock} ლ.` : ""}</option>
+                        {products.map(p => (
+                            <option key={p.id} value={p.id}>
+                                {p.colors?.name} — {p.categories?.name} ({p.thickness})
+                            </option>
+                        ))}
+                    </Select>
+                    <Select label="კლიენტი" value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}>
+                        <option value="">აირჩიეთ კლიენტი (სურვილისამებრ)</option>
+                        {customers.map(c => (
+                            <option key={c.id} value={c.id}>{c.full_name}</option>
                         ))}
                     </Select>
                     <div className="grid grid-cols-2 gap-3">
-                        <Input label="რაოდენობა" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} placeholder="0" min="1" />
-                        <Input label="ფასი (₾/ლ)" type="number" value={form.sale_price} onChange={e => setForm({ ...form, sale_price: e.target.value })} placeholder="0.00" />
+                        <Input label="რაოდენობა (ლისტი) *" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} placeholder="0" min="1" />
+                        <Input label="გაყიდვის ფასი (1 ლ.) *" type="number" value={form.sale_price} onChange={e => setForm({ ...form, sale_price: e.target.value })} placeholder="0.00" />
                     </div>
-                    {form.quantity && form.sale_price && (
-                        <div className="rounded-xl p-3 mb-4 text-sm" style={{ background: t.input }}>
-                            <span style={{ color: t.textMuted }}>სულ: </span>
-                            <span className="font-bold" style={{ color: "#34d399" }}>{fmt(+form.quantity * +form.sale_price)}</span>
-                        </div>
-                    )}
-                    <Btn className="w-full justify-center" onClick={saveSale}>{editItem ? "განახლება" : "გაყიდვის რეგისტრაცია"}</Btn>
+                    <Input label="შენიშვნა" value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} placeholder="დამატებითი ინფო..." />
+                    <Btn className="w-full justify-center mt-2" onClick={saveSale}>{editItem ? "განახლება" : "გაყიდვის დამატება"}</Btn>
                 </Modal>
             )}
         </div>
