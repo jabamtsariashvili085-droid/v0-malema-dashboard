@@ -45,6 +45,10 @@ function App() {
   };
 
   useEffect(() => {
+    if (!supabase) {
+      setAuthLoading(false);
+      return;
+    }
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setAuthLoading(false);
@@ -53,11 +57,22 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const logout = async () => { await supabase.auth.signOut(); };
+  const logout = async () => { if (supabase) await supabase.auth.signOut(); };
 
   if (authLoading) return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: t.bg }}>
       <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: `${t.accent}30`, borderTopColor: t.accent }} />
+    </div>
+  );
+
+  if (!supabase) return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: t.bg }}>
+      <div className="text-center max-w-md p-8 rounded-2xl border" style={{ background: t.card, borderColor: t.border }}>
+        <p className="text-4xl mb-4">&#9888;</p>
+        <h2 className="text-xl font-bold mb-2" style={{ color: t.text }}>Supabase კონფიგურაციის შეცდომა</h2>
+        <p className="text-sm mb-4" style={{ color: t.textMuted }}>VITE_SUPABASE_URL და VITE_SUPABASE_ANON_KEY გარემოს ცვლადები არ არის კონფიგურირებული.</p>
+        <p className="text-xs" style={{ color: t.textFaint }}>შეამოწმეთ .env ფაილი პროექტის root-ში.</p>
+      </div>
     </div>
   );
 
