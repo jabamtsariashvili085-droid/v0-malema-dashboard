@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply antialiased;
+  }
+}
+
+/* Glassmorphism Utility */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dark .glass {
+  background: rgba(10, 10, 26, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Advanced Glow Card */
+.glow-card {
+  @apply relative overflow-hidden transition-all duration-500;
+}
+
+.glow-card::before {
+  content: "";
+  @apply absolute -inset-[100%] opacity-0 transition-opacity duration-500;
+  background: conic-gradient(from 0deg,
+      transparent 0%,
+      var(--glow-color, #4a7c59) 25%,
+      transparent 50%,
+      var(--glow-color, #4a7c59) 75%,
+      transparent 100%);
+  animation: rotate 4s linear infinite;
+  z-index: 0;
+}
+
+.glow-card:hover::before {
+  @apply opacity-30;
+}
+
+.glow-card::after {
+  content: "";
+  @apply absolute inset-[1px] rounded-[inherit] z-[1];
+  background: inherit;
+}
+
+.glow-content {
+  @apply relative z-[2] w-full h-full;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Page Transitions */
+.page-enter {
+  animation: slideUpFade 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(155, 155, 155, 0.2);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(155, 155, 155, 0.3);
+}
+
+@media print {
+  aside, header, .print\:hidden, button {
+    display: none !important;
+  }
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+  body {
+    background: white !important;
+  }
+  .max-w-5xl {
+    max-width: none !important;
+    width: 100% !important;
+  }
+}
