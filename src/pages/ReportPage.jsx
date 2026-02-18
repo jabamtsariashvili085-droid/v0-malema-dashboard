@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
 import { Card, StatCard, Loader } from '../components/UI';
@@ -7,17 +7,59 @@ import { fmt, fmtNum } from '../utils/format';
 export function ReportPage() {
     const { t, searchQuery } = useApp();
     const [report, setReport] = useState([]);
+    const [allSales, setAllSales] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [dateFrom, setDateFrom] = useState("");
+    const [dateTo, setDateTo] = useState("");
 
     useEffect(() => { loadData(); }, []);
     const loadData = async () => {
-        const { data } = await supabase.from("profit_report").select("*");
-        setReport(data || []); setLoading(false);
+        const [rep, sales] = await Promise.all([
+            supabase.from("profit_report").select("*"),
+            supabase.from("sales").select("*, products(*, categories(name), colors(name))").order("created_at", { ascending: false }),
+        ]);
+        setReport(rep.data || []);
+        setAllSales(sales.data || []);
+        setLoading(false);
     };
+
+    const filteredReport = useMemo(() => {
+        if (!dateFrom && !dateTo) return report;
+        // When date filter is active, compute from sales data
+        const filtered = allSales.filter(s => {
+            const d = new Date(s.created_at);
+            if (dateFrom && d < new Date(dateFrom)) return false;
+            if (dateTo && d > new Date(dateTo + "T23:59:59")) return false;
+            return true;
+        });
+        const grouped = {};
+        filtered.forEach(s => {
+            const key = s.product_id;
+            if (!grouped[key]) {
+                grouped[key] = {
+                    category: s.products?.categories?.name || "",
+                    color: s.products?.colors?.name || "",
+                    thickness: s.products?.thickness || "",
+                    total_sold: 0,
+                    total_revenue: 0,
+                    total_cost: 0,
+                    total_profit: 0,
+                };
+            }
+            const qty = s.quantity || 0;
+            const revenue = s.sale_price * qty;
+            const cost = (s.products?.purchase_price || 0) * qty;
+            grouped[key].total_sold += qty;
+            grouped[key].total_revenue += revenue;
+            grouped[key].total_cost += cost;
+            grouped[key].total_profit += revenue - cost;
+        });
+        return Object.values(grouped);
+    }, [report, allSales, dateFrom, dateTo]);
 
     if (loading) return <Loader />;
 
-    const totals = report.reduce((acc, r) => ({
+    const totals = filteredReport.reduce((acc, r) => ({
         sold: acc.sold + (r.total_sold || 0),
         revenue: acc.revenue + (r.total_revenue || 0),
         cost: acc.cost + (r.total_cost || 0),
@@ -26,9 +68,27 @@ export function ReportPage() {
 
     return (
         <div className="space-y-6 page-enter">
-            <div>
-                <h2 className="text-2xl font-bold font-display" style={{ color: t.text }}>მოგების ანგარიში</h2>
-                <p className="text-sm mt-1" style={{ color: t.textMuted }}>ყველა გაყიდვის სტატისტიკა</p>
+            <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                    <h2 className="text-2xl font-bold font-display" style={{ color: t.text }}>მოგების ანგარიში</h2>
+                    <p className="text-sm mt-1" style={{ color: t.textMuted }}>ყველა გაყიდვის სტატისტიკა</p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                        className="rounded-xl px-3 py-2 text-sm border focus:outline-none"
+                        style={{ background: t.input, borderColor: t.inputBorder, color: t.text }} />
+                    <span style={{ color: t.textFaint }}>-</span>
+                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                        className="rounded-xl px-3 py-2 text-sm border focus:outline-none"
+                        style={{ background: t.input, borderColor: t.inputBorder, color: t.text }} />
+                    {(dateFrom || dateTo) && (
+                        <button onClick={() => { setDateFrom(""); setDateTo(""); }}
+                            className="text-xs px-3 py-2 rounded-xl border"
+                            style={{ color: t.textMuted, borderColor: t.inputBorder, background: t.input }}>
+                            გასუფთავება
+                        </button>
+                    )}
+                </div>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <StatCard label="გაყიდული" value={fmtNum(totals.sold)} sub="ლისტი სულ" color="#60a5fa" />
@@ -50,7 +110,7 @@ export function ReportPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {report.filter(r => {
+                            {filteredReport.filter(r => {
                                 const query = searchQuery.toLowerCase().trim();
                                 if (!query) return true;
                                 return (
@@ -70,7 +130,7 @@ export function ReportPage() {
                                     <td className="py-3 text-right font-bold" style={{ color: "#a78bfa" }}>{fmt(r.total_profit)}</td>
                                 </tr>
                             ))}
-                            {report.length === 0 && (
+                            {filteredReport.length === 0 && (
                                 <tr><td colSpan="5" className="py-8 text-center" style={{ color: t.textFaint }}>მონაცემები არ არის</td></tr>
                             )}
                         </tbody>

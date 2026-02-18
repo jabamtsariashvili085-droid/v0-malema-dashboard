@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
 import { Card, StatCard, Loader } from '../components/UI';
@@ -8,6 +8,8 @@ export function AccountingPage() {
     const { t, searchQuery } = useApp();
     const [sales, setSales] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [dateFrom, setDateFrom] = useState("");
+    const [dateTo, setDateTo] = useState("");
 
     useEffect(() => { loadData(); }, []);
 
@@ -27,6 +29,15 @@ export function AccountingPage() {
         setSales(data || []);
         setLoading(false);
     };
+
+    const filteredByDate = useMemo(() => {
+        return sales.filter(s => {
+            const d = new Date(s.created_at);
+            if (dateFrom && d < new Date(dateFrom)) return false;
+            if (dateTo && d > new Date(dateTo + "T23:59:59")) return false;
+            return true;
+        });
+    }, [sales, dateFrom, dateTo]);
 
     const exportToCSV = () => {
         const headers = ["თარიღი", "პროდუქტი", "რაოდენობა", "ერთ. ფასი", "ჯამური ფასი", "დანახარჯი", "მოგება"];
@@ -60,7 +71,7 @@ export function AccountingPage() {
 
     if (loading) return <Loader />;
 
-    const totals = sales.reduce((acc, s) => {
+    const totals = filteredByDate.reduce((acc, s) => {
         const totalPrice = s.sale_price * s.quantity;
         const cost = (s.product?.purchase_price || 0) * s.quantity;
         return {
@@ -77,14 +88,30 @@ export function AccountingPage() {
                     <h2 className="text-2xl font-bold font-display" style={{ color: t.text }}>ბუღალტერია</h2>
                     <p className="text-sm mt-1" style={{ color: t.textMuted }}>ფინანსური მიმოხილვა და ექსპორტი</p>
                 </div>
-                <button
-                    onClick={exportToCSV}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all print:hidden"
-                    style={{ background: t.accent, color: "white" }}
-                >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-                    Excel (CSV) ექსპორტი
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                        className="rounded-xl px-3 py-2 text-sm border focus:outline-none"
+                        style={{ background: t.input, borderColor: t.inputBorder, color: t.text }} />
+                    <span style={{ color: t.textFaint }}>-</span>
+                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                        className="rounded-xl px-3 py-2 text-sm border focus:outline-none"
+                        style={{ background: t.input, borderColor: t.inputBorder, color: t.text }} />
+                    {(dateFrom || dateTo) && (
+                        <button onClick={() => { setDateFrom(""); setDateTo(""); }}
+                            className="text-xs px-3 py-2 rounded-xl border"
+                            style={{ color: t.textMuted, borderColor: t.inputBorder, background: t.input }}>
+                            გასუფთავება
+                        </button>
+                    )}
+                    <button
+                        onClick={exportToCSV}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all print:hidden"
+                        style={{ background: t.accent, color: t.accentText }}
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                        CSV
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -107,7 +134,7 @@ export function AccountingPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {sales.filter(s => {
+                            {filteredByDate.filter(s => {
                                 const query = searchQuery.toLowerCase().trim();
                                 if (!query) return true;
                                 return (
@@ -131,7 +158,7 @@ export function AccountingPage() {
                                     </tr>
                                 );
                             })}
-                            {sales.length === 0 && (
+                            {filteredByDate.length === 0 && (
                                 <tr><td colSpan="6" className="py-8 text-center" style={{ color: t.textFaint }}>მონაცემები არ არის</td></tr>
                             )}
                         </tbody>
