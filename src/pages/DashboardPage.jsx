@@ -34,16 +34,26 @@ export function DashboardPage() {
 
     const loadData = async () => {
         try {
+            console.log("[v0] Dashboard: Starting data load...");
             const [inv, sales, profit] = await Promise.all([
                 supabase.from("inventory").select("*"),
                 supabase.from("sales").select("*, customers(full_name), products(*, categories(name), colors(name))").order("created_at", { ascending: false }),
                 supabase.from("profit_report").select("*"),
             ]);
+            console.log("[v0] Dashboard inventory:", { data: inv.data?.length, error: inv.error });
+            console.log("[v0] Dashboard sales:", { data: sales.data?.length, error: sales.error });
+            console.log("[v0] Dashboard profit:", { data: profit.data?.length, error: profit.error });
+            if (inv.error) console.log("[v0] Inventory error detail:", JSON.stringify(inv.error));
+            if (sales.error) console.log("[v0] Sales error detail:", JSON.stringify(sales.error));
+            if (profit.error) console.log("[v0] Profit error detail:", JSON.stringify(profit.error));
             setInventory(inv.data || []);
             setAllSales(sales.data || []);
             setProfitData(profit.data || []);
             setLowStock((inv.data || []).filter(i => i.stock <= 10 && i.stock >= 0));
-        } catch (e) { toast("მონაცემების ჩატვირთვა ვერ მოხერხდა", "error"); }
+        } catch (e) { 
+            console.log("[v0] Dashboard CATCH error:", e.message);
+            toast("მონაცემების ჩატვირთვა ვერ მოხერხდა", "error"); 
+        }
         finally { setLoading(false); }
     };
 
